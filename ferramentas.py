@@ -11,6 +11,7 @@ import seaborn as sns
 import streamlit as st
 from langchain_core.tools import tool, Tool
 from langchain_experimental.tools import PythonAstREPLTool
+from langchain_core.tools import StructuredTool
 
 # Obtenção da chave de api
 load_dotenv()
@@ -348,30 +349,30 @@ def gerador_graficos_estatisticos(instrucao: str, df: pd.DataFrame) -> str:
 
     
 
+
 def obter_todas_ferramentas(df: pd.DataFrame):
-    """
-    Função fábrica que empacota todas as ferramentas e injeta o DataFrame
-    para que o LLM precise se preocupar apenas com os textos de entrada.
-    """
     
-    ferramenta_metricas = Tool(
+    # Ferramenta de métricas
+    ferramenta_metricas = StructuredTool.from_function(
+        func=lambda query: metricas_calculadas_jogadores(query, df),
         name="metricas_calculadas_jogadores",
-        description="Utilize esta ferramenta para rankings globais, comparações de eficiência, maiores pontuadores ou líderes de fundamentos específicos (ataque, saque, bloqueio, recepção, defesa) agregando todo o campeonato.",
-        func=lambda query: metricas_calculadas_jogadores(query, df)
+        description="Utilize esta ferramenta para rankings globais, comparações de eficiência, maiores pontuadores ou líderes de fundamentos específicos (ataque, saque, bloqueio, recepção, defesa) agregando todo o campeonato."
     )
 
-    ferramenta_radar = Tool(
+    # Ferramenta de radar
+    ferramenta_radar = StructuredTool.from_function(
+        func=lambda entrada: radar_comparativo_atletas(entrada, df),
         name="radar_comparativo_atletas",
-        description="Utilize esta ferramenta quando o usuário pedir para comparar dois jogadores ou gerar um radar/perfil técnico entre eles. A entrada deve conter os dois nomes separados por vírgula, e opcionalmente o tipo de métrica ('relativo' ou 'absoluto'). Exemplos: 'Maicon, Paulo', 'Maicon, Paulo, absoluto'.",
-        func=lambda entrada: radar_comparativo_atletas(entrada, df)
+        description="Utilize esta ferramenta quando o usuário pedir para comparar dois jogadores ou gerar um radar/perfil técnico entre eles. A entrada deve conter os dois nomes separados por vírgula, e opcionalmente o tipo de métrica ('relativo' ou 'absoluto')."
     )
 
-    ferramenta_graficos = Tool(
+    # CORREÇÃO DA FERRAMENTA DE GRÁFICOS
+    ferramenta_graficos = StructuredTool.from_function(
+        func=lambda instrucao: gerador_graficos_estatisticos(instrucao, df),
         name="gerador_graficos_estatisticos",
-        description="Utilize esta ferramenta para gráficos livres de distribuição ou correlação (barras, dispersão, séries temporais por set/partida). Exemplos: 'Mostre a distribuição de erros de saque por partida', 'Plote os pontos de bloqueio por adversário'.",
-        func=lambda instrucao: gerador_graficos_estatisticos(instrucao, df)
+        description="Utilize esta ferramenta para gráficos livres de distribuição ou correlação (barras, dispersão, séries temporais por set/partida)."
     )
     
     ferramenta_motor = criar_motor_calculo(df)
 
-    return [ferramenta_metricas, ferramenta_radar, ferramenta_graficos, ferramenta_motor]   
+    return [ferramenta_metricas, ferramenta_radar, ferramenta_graficos, ferramenta_motor]
