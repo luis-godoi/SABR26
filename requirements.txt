@@ -1,8 +1,11 @@
-streamlit
-langchain
-langchain-groq
-langchain-experimental
+python-dotenv
 pandas
+numpy
 matplotlib
 seaborn
-python-dotenv
+streamlit
+langchain
+langchain-core
+langchain-groq
+langchain-experimental
+langgraph
