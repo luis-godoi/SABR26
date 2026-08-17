@@ -25,6 +25,44 @@ llm = ChatGroq(
 
 # Ferramentas 
 
+def criar_motor_calculo(df: pd.DataFrame) -> Tool:
+    """
+    Inicializa a ferramenta de execução Python com o DataFrame injetado no ambiente local.
+    """
+    
+    def executor_pandas(expressao: str) -> str:
+        """Executa a string contendo a expressão Pandas e retorna o resultado."""
+        try:
+            # O eval() executa a expressão injetando o df, pd e np no contexto
+            resultado = eval(expressao, {"df": df, "pd": pd, "np": np})
+            return str(resultado)
+        except Exception as e:
+            # Retorna o erro para o LLM tentar corrigir
+            return f"Erro de sintaxe/execução: {str(e)}"
+
+    ferramenta_motor_calculo = Tool(
+        name="motor_calculo_python",
+        func=executor_pandas,
+        description="""Utilize esta ferramenta para cálculos pontuais ou filtragens compostas
+        diretamente sobre o DataFrame pandas carregado na variável `df`.
+        
+        Exemplos de uso:
+        - "Quantos pontos o jogador X fez no 2º set contra Y?"
+        - "Qual a média de idade do time?"
+        - "Quantos bloqueios aconteceram no set 3 do jogo Z?"
+        
+        Regras Inegociáveis:
+        1. Escreva APENAS a expressão Python/Pandas que retorna o valor desejado (ex: `df[(df['player_name'] == 'X')]['total_points'].sum()`).
+        2. NÃO use `print()`. Apenas coloque a expressão.
+        3. NÃO use para gerar relatórios gerais, rankings consolidados ou gráficos — temos ferramentas específicas para isso.
+        """
+    )
+    
+    return ferramenta_motor_calculo
+
+
+
+
 # Métricas calculadas
 
 @tool
@@ -305,3 +343,6 @@ def gerador_graficos_estatisticos(instrucao: str, df: pd.DataFrame) -> str:
 
     except Exception as e:
         return f"Falha ao gerar o gráfico. Erro técnico retornado: {str(e)}"
+
+    
+    
