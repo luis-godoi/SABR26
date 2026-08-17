@@ -229,3 +229,79 @@ def radar_comparativo_atletas(entrada: str, df: pd.DataFrame) -> str:
             f"Valores ({modo}) de {atleta2}: {[round(v, 1) for v in valores2]}. "
             f"Forneça um breve resumo analítico apontando a principal vantagem de cada atleta baseando-se nestes números exatos.")
 
+
+
+
+# Gerador de gráficos estatísticos
+
+@tool
+def gerador_graficos_estatisticos(instrucao: str, df: pd.DataFrame) -> str:
+    """Utilize esta ferramenta para gráficos livres de distribuição ou correlação
+    (barras, dispersão, séries temporais por set/partida). Exemplos: 'Mostre a
+    distribuição de erros de saque por partida', 'Plote os pontos de bloqueio por adversário'."""
+
+    # 1. Template rigoroso para extrair código Python e guiar o pré-processamento
+    template_grafico = PromptTemplate(
+        template="""
+        Você é um cientista de dados especialista em Python, Pandas e Matplotlib focando em Voleibol.
+        Escreva EXCLUSIVAMENTE o código Python para gerar o gráfico solicitado.
+        NÃO inclua marcações markdown como ```python, texto explicativo ou introduções. Apenas o código puro.
+
+        O DataFrame já está carregado na variável `df`.
+        Colunas disponíveis no DataFrame: {colunas}
+
+        Instrução do usuário para o gráfico: {instrucao}
+
+        Regras ESTRITAS para os Dados e Gráfico:
+        1. TRATAMENTO DE DADOS: Se a métrica for "por partida" ou "por adversário", PRIMEIRO filtre os dados consolidados: `df_plot = df[df['set_no'] == 'MATCH'].copy()`.
+        2. AGREGAÇÃO: Agrupe corretamente. Exemplo: para bloqueios da equipe por partida, faça `agrupado = df_plot.groupby(['match_id', 'opponent'])['block_points'].sum().reset_index()`.
+        3. EIXO X LEGÍVEL: NUNCA coloque o `match_id` numérico no eixo X. Se for uma linha do tempo ou progressão por partida, use a coluna `opponent` (o nome do país) no eixo X.
+        4. ESTÉTICA: 
+           - Crie a figura com `fig, ax = plt.subplots(figsize=(10, 6))`
+           - Fundo escuro: `fig.patch.set_facecolor('#0e1117')` e `ax.set_facecolor('#0e1117')`
+           - Textos, bordas e ticks em branco ou cinza: `ax.tick_params(colors='white')`, `ax.xaxis.label.set_color('white')`, `ax.yaxis.label.set_color('white')`, `ax.title.set_color('white')`
+           - Para gráficos de progressão (linha), adicione marcadores: `ax.plot(..., marker='o', color='#00e5ff')`
+        5. ROTAÇÃO: Se o eixo X contiver texto (como os nomes dos adversários), aplique `plt.xticks(rotation=45, ha='right')`.
+        6. NÃO chame `plt.show()`. O gráfico será capturado posteriormente pela ferramenta pai.
+        """,
+        input_variables=["instrucao", "colunas"]
+    )
+
+    colunas_str = ", ".join(df.columns.astype(str).tolist())
+
+    # 2. Gera o código usando o LLM
+    cadeia_grafico = template_grafico | llm | StrOutputParser()
+    codigo_python = cadeia_grafico.invoke({"instrucao": instrucao, "colunas": colunas_str})
+
+    # Limpeza de segurança caso o LLM insista em colocar blocos markdown
+    codigo_python = codigo_python.replace("```python", "").replace("```", "").strip()
+
+    # 3. Sandbox de Execução
+    ambiente = {
+        "df": df,
+        "plt": plt,
+        "sns": sns,
+        "np": np,
+        "pd": pd
+    }
+
+    try:
+        # Fecha qualquer figura residual antes de começar
+        plt.close('all')
+        
+        # Executa o código gerado no escopo restrito do dicionário "ambiente"
+        exec(codigo_python, ambiente)
+        
+        # 4. Captura e exibe no Streamlit
+        fig = plt.gcf()
+        
+        if not fig.axes:
+            return "Erro: O código foi executado, mas nenhum gráfico foi gerado."
+            
+        st.pyplot(fig)
+        plt.close(fig)
+        
+        return "Gráfico gerado e exibido com sucesso na interface. Diga ao usuário que o gráfico está na tela."
+
+    except Exception as e:
+        return f"Falha ao gerar o gráfico. Erro técnico retornado: {str(e)}"
