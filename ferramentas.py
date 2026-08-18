@@ -10,6 +10,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.tools import StructuredTool
 from langchain_experimental.tools import PythonAstREPLTool
+import re 
 
 # Obtenção da chave de API
 load_dotenv()
@@ -68,9 +69,8 @@ def calcular_metricas_consolidadas(df: pd.DataFrame) -> pd.DataFrame:
 
     return agrupado.round(2)
 
-
 # =====================================================================
-# 2. RADAR COMPARATIVO (Mantido com melhorias de tipagem)
+# 2. RADAR COMPARATIVO (COM LEGENDA RESTAURADA)
 # =====================================================================
 def radar_comparativo_atletas(entrada: str, df: pd.DataFrame) -> str:
     """Compara dois jogadores gerando um radar técnico."""
@@ -141,48 +141,48 @@ def radar_comparativo_atletas(entrada: str, df: pd.DataFrame) -> str:
     ax.set_xticklabels(categorias, fontsize=10, weight='bold', color="#E6EDF3")
     fig.text(0.5, 0.94, f"RADAR DE PERFORMANCE - {'ABSOLUTAS' if modo == 'absoluto' else 'RELATIVAS (%)'}", fontsize=14, weight='bold', color="#E6EDF3", ha='center')
     
+    # RESTAURANDO A LEGENDA COLORIDA
+    fig.text(0.35, 0.86, f"● {atleta1}", color="#58A6FF", fontsize=11, weight='bold', ha='center')
+    fig.text(0.65, 0.86, f"● {atleta2}", color="#FF7B72", fontsize=11, weight='bold', ha='center')
+    
     st.pyplot(fig)
     plt.close(fig)
 
-    return f"Gráfico de radar '{modo}' renderizado. Valores de {atleta1}: {[round(v, 1) for v in valores1]}. Valores de {atleta2}: {[round(v, 1) for v in valores2]}."
-
+    return f"Gráfico de radar renderizado. Valores de {atleta1}: {[round(v, 1) for v in valores1]}. Valores de {atleta2}: {[round(v, 1) for v in valores2]}."
 
 # =====================================================================
-# 3. GERADOR DE GRÁFICOS (Adição de Tipos de Dados e Amostra)
+# 3. GERADOR DE GRÁFICOS (COM FILTRO REGEX)
 # =====================================================================
 def gerador_graficos_estatisticos(instrucao: str, df: pd.DataFrame) -> str:
-    """Gera gráficos Matplotlib/Seaborn injetando metadados no prompt para evitar alucinações."""
-    
+    """Gera gráficos Matplotlib/Seaborn."""
     colunas_info = "\n".join([f"- {col} ({dtype})" for col, dtype in df.dtypes.items()])
     amostra_dados = df.head(3).to_dict(orient='records')
 
     template_grafico = PromptTemplate(
         template="""
-        Você é um cientista de dados. Escreva EXCLUSIVAMENTE o código Python para gerar o gráfico solicitado.
-
-        ## Instrução do usuário: {instrucao}
-
-        ## Metadados do DataFrame (variável `df`):
-        {colunas}
-
-        ## Amostra dos Dados:
-        {amostra}
-
-        Regras ESTRITAS:
-        1. TRATAMENTO: Para métricas gerais do campeonato, filtre com `df_plot = df[df['set_no'] == 'MATCH'].copy()`.
-        2. ESTÉTICA: 
-           - `fig, ax = plt.subplots(figsize=(10, 6))`
-           - Fundo escuro: `fig.patch.set_facecolor('#0e1117')`, `ax.set_facecolor('#0e1117')`
-           - Textos brancos: `ax.tick_params(colors='white')`, `ax.xaxis.label.set_color('white')`, `ax.yaxis.label.set_color('white')`
-        3. ROTAÇÃO: Textos longos no eixo X, use `plt.xticks(rotation=45, ha='right')`.
-        4. Retorne APENAS o código puro, sem introduções ou marcações Markdown. NUNCA chame `plt.show()`.
+        Você é um cientista de dados. Escreva EXCLUSIVAMENTE o código Python para gerar o gráfico.
+        ## Instrução: {instrucao}
+        ## Metadados DataFrame `df`: {colunas}
+        ## Amostra: {amostra}
+        
+        Regras:
+        1. Para métricas gerais da partida, filtre com `df_plot = df[df['set_no'] == 'MATCH'].copy()`.
+        2. Estética: Fundo escuro '#0e1117' em `fig` e `ax`, textos em branco.
+        3. Apenas código Python.
         """,
         input_variables=["instrucao", "colunas", "amostra"]
     )
 
     cadeia_grafico = template_grafico | llm | StrOutputParser()
-    codigo_python = cadeia_grafico.invoke({"instrucao": instrucao, "colunas": colunas_info, "amostra": amostra_dados})
-    codigo_python = codigo_python.replace("```python", "").replace("```", "").strip()
+    resposta_llm = cadeia_grafico.invoke({"instrucao": instrucao, "colunas": colunas_info, "amostra": amostra_dados})
+    
+    # FILTRO INTELIGENTE: Pega apenas o que estiver dentro de blocos de código python, 
+    # ignorando conversas extras que o LLM possa tentar adicionar.
+    match = re.search(r"```(?:python)?(.*?)```", resposta_llm, re.DOTALL)
+    if match:
+        codigo_python = match.group(1).strip()
+    else:
+        codigo_python = resposta_llm.replace("```python", "").replace("```", "").strip()
 
     ambiente = {"df": df, "plt": plt, "sns": sns, "np": np, "pd": pd}
 
@@ -197,56 +197,47 @@ def gerador_graficos_estatisticos(instrucao: str, df: pd.DataFrame) -> str:
     except Exception as e:
         return f"Falha ao gerar o gráfico. Erro técnico: {str(e)}"
 
-
 # =====================================================================
-# 4. INSTANCIADOR DE FERRAMENTAS
+# 4. INSTANCIADOR DE FERRAMENTAS (SEM LAMBDAS)
 # =====================================================================
 def obter_todas_ferramentas(df: pd.DataFrame):
-    
-    # 1. Pré-calcula as métricas
     df_metricas = calcular_metricas_consolidadas(df)
 
-    # 2. Wrapper do Motor Python (Resolve o erro "missing properties: 'query'")
+    # 1. Ferramenta Python (já arrumada no passo anterior)
     def executor_pandas_seguro(query: str) -> str:
-        """Executa código Python no Pandas."""
-        # Limpa crases markdown que modelos OSS costumam colocar dentro do JSON indevidamente
         query_limpa = query.replace("```python", "").replace("```", "").strip()
-        
-        # Instancia o poderoso motor do LangChain internamente
         repl = PythonAstREPLTool(locals={"df": df, "df_metricas": df_metricas, "pd": pd, "np": np})
-        
         try:
-            # Invoca o REPL forçando o parâmetro correto internamente
-            resultado = repl.invoke({"query": query_limpa})
-            return str(resultado)
+            return str(repl.invoke({"query": query_limpa}))
         except Exception as e:
-            return f"Erro na execução do código Python: {str(e)}"
+            return f"Erro na execução Python: {str(e)}"
 
     ferramenta_python = StructuredTool.from_function(
         func=executor_pandas_seguro,
         name="motor_calculo_python",
-        description="""Utilize esta ferramenta para executar código Python e realizar consultas precisas no Pandas.
-        ATENÇÃO: Você DEVE enviar o código Python puro através do parâmetro obrigatório 'query'.
-        
-        Acesso a DOIS DataFrames:
-        - `df`: Contém os dados brutos partida a partida.
-        - `df_metricas`: Contém todos os totais e percentuais agregados por jogador.
-        
-        Sempre priorize o `df_metricas` para perguntas de totais ou eficiências. Exemplo de query válida: 
-        df_metricas.sort_values('attack_points', ascending=False).head(3)"""
+        description="""Utilize para consultas no Pandas. Envie a expressão obrigatoriamente pelo parâmetro 'query'."""
     )
 
-    # 3. Radar e Gráficos continuam iguais
+    # 2. Wrapper para o Radar (Resolve erro de validação do LLM)
+    def wrapper_radar(entrada: str) -> str:
+        """Gera um radar comparativo entre dois atletas. """
+        return radar_comparativo_atletas(entrada, df)
+
     ferramenta_radar = StructuredTool.from_function(
-        func=lambda entrada: radar_comparativo_atletas(entrada, df),
+        func=wrapper_radar,
         name="radar_comparativo_atletas",
-        description="Gera um radar/perfil técnico comparativo. Entrada: dois nomes separados por vírgula e o tipo ('relativo' ou 'absoluto')."
+        description="Gera um radar técnico. Envie a string obrigatoriamente no parâmetro 'entrada' com os dois nomes separados por vírgula (Ex: 'Yan, Paulo')."
     )
+
+    # 3. Wrapper para o Gráfico (Resolve erro de validação do LLM)
+    def wrapper_graficos(instrucao: str) -> str:
+        """Gera gráficos estatísticos."""
+        return gerador_graficos_estatisticos(instrucao, df)
 
     ferramenta_graficos = StructuredTool.from_function(
-        func=lambda instrucao: gerador_graficos_estatisticos(instrucao, df),
+        func=wrapper_graficos,
         name="gerador_graficos_estatisticos",
-        description="Gera gráficos livres de distribuição ou séries temporais baseados em perguntas de linguagem natural."
+        description="Gera gráficos livres. Envie a requisição obrigatoriamente através do parâmetro em texto chamado 'instrucao'."
     )
     
     return [ferramenta_python, ferramenta_radar, ferramenta_graficos]
