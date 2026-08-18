@@ -70,59 +70,78 @@ def calcular_metricas_consolidadas(df: pd.DataFrame) -> pd.DataFrame:
     return agrupado.round(2)
 
 # =====================================================================
-# 2. RADAR COMPARATIVO (COM LEGENDA RESTAURADA)
+# 2. RADAR COMPARATIVO (MÉTRICAS FIXAS E SIMPLIFICADAS)
 # =====================================================================
 def radar_comparativo_atletas(entrada: str, df: pd.DataFrame) -> str:
-    """Compara dois jogadores gerando um radar técnico."""
+    """Compara dois jogadores gerando um radar técnico com 6 métricas fixas."""
+    
+    # Extrai os nomes passados pelo LLM (ignora parâmetros extras, se houver)
     partes = [p.strip() for p in entrada.split(",")]
     if len(partes) < 2:
         return "Erro: Informe ao menos os dois nomes separados por vírgula, ex: 'Maicon, Paulo'."
     
     atleta1, atleta2 = partes[0], partes[1]
-    modo = partes[2].lower() if len(partes) > 2 else 'relativo'
 
+    # Valida a existência dos jogadores na base bruta original
     validos = df['player_name'].unique()
     faltantes = [a for a in (atleta1, atleta2) if a not in validos]
     if faltantes:
         return f"Jogador(es) não encontrado(s): {', '.join(faltantes)}."
 
-    base = df[df['set_no'] == 'MATCH'].copy()
-    colunas = [c for c in ['attack_attempts', 'attack_points', 'attack_faults', 'block_attempts', 'block_points', 'block_faults', 'serve_attempts', 'serve_aces', 'serve_faults', 'reception_attempts', 'reception_perfect', 'reception_faults', 'dig_attempts', 'dig_success', 'total_points'] if c in base.columns]
-    
-    stats = base.groupby('player_name')[colunas].sum().reset_index()
+    # Utiliza a função de métricas consolidadas já existente para facilitar a coleta
+    df_metricas = calcular_metricas_consolidadas(df)
 
-    if modo == 'absoluto':
-        categorias = ['Attack Pts', 'Block Pts', 'Aces', 'Digs', 'Rec Perf', 'Total Pts']
-        max_ranges = [100, 20, 10, 40, 60, 120]
-        def extrair_valores(nome):
-            row = stats[stats['player_name'] == nome].iloc[0]
-            return [row.get('attack_points', 0), row.get('block_points', 0), row.get('serve_aces', 0), row.get('dig_success', 0), row.get('reception_perfect', 0), row.get('total_points', 0)]
-    else:
-        categorias = ['Kill %', 'Att Eff %', 'Rec Eff %', 'Srv Eff %', 'Blk Eff %', 'Dig %']
-        max_ranges = [80, 60, 50, 20, 30, 90]
-        def extrair_valores(nome):
-            row = stats[stats['player_name'] == nome].iloc[0]
-            div_segura = lambda num, den: (num / den * 100) if den > 0 else 0.0
-            return [
-                div_segura(row.get('attack_points', 0), row.get('attack_attempts', 1)),
-                div_segura((row.get('attack_points', 0) - row.get('attack_faults', 0)), row.get('attack_attempts', 1)),
-                div_segura((row.get('reception_perfect', 0) - row.get('reception_faults', 0)), row.get('reception_attempts', 1)),
-                div_segura((row.get('serve_aces', 0) - row.get('serve_faults', 0)), row.get('serve_attempts', 1)),
-                div_segura((row.get('block_points', 0) - row.get('block_faults', 0)), row.get('block_attempts', 1)),
-                div_segura(row.get('dig_success', 0), row.get('dig_attempts', 1))
-            ]
+    categorias = [
+        'Aprov. Ataque (%)', 
+        'Efic. Ataque (%)', 
+        'Pontos Bloqueio', 
+        'Aces', 
+        'Defesas Bem Sucedidas', 
+        'Aprov. Recepção (%)'
+    ]
+    
+    # Escalas máximas dinâmicas para normalização (0 a 1 no radar)
+    # Porcentagens vão até 100. Absolutos pegam o máximo do campeonato para ajustar a escala.
+    max_ranges = [
+        100.0, 
+        100.0, 
+        max(df_metricas['block_points'].max(), 1), 
+        max(df_metricas['serve_aces'].max(), 1), 
+        max(df_metricas['dig_success'].max(), 1), 
+        100.0
+    ]
+
+    # Função para extrair as 6 métricas requisitadas
+    def extrair_valores(nome):
+        row = df_metricas[df_metricas['player_name'] == nome]
+        if row.empty:
+            return [0, 0, 0, 0, 0, 0]
+        
+        row = row.iloc[0]
+        return [
+            row.get('aproveitamento_ataque_pct', 0),
+            row.get('eficiencia_ataque_pct', 0),
+            row.get('block_points', 0),
+            row.get('serve_aces', 0),
+            row.get('dig_success', 0),
+            row.get('aproveitamento_recepcao_pct', 0)
+        ]
 
     valores1 = extrair_valores(atleta1)
     valores2 = extrair_valores(atleta2)
+    
+    # Normalização dos valores para exibição polar garantindo limites entre 0 e 1 (evitando bugs visuais com eixos negativos)
     val1_norm = [min(1.0, max(0.0, r / m)) if pd.notna(r) else 0.0 for r, m in zip(valores1, max_ranges)]
     val2_norm = [min(1.0, max(0.0, r / m)) if pd.notna(r) else 0.0 for r, m in zip(valores2, max_ranges)]
 
+    # Fecha o ciclo do polígono no gráfico
     N = len(categorias)
     angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
     angles += angles[:1]
     val1_norm += val1_norm[:1]
     val2_norm += val2_norm[:1]
 
+    # Renderização (Matplotlib estético mantido)
     fig, ax = plt.subplots(figsize=(8, 9), subplot_kw=dict(polar=True), facecolor="#0D1117")
     ax.set_facecolor("#0D1117")
     ax.set_theta_offset(np.pi / 2)
@@ -139,12 +158,13 @@ def radar_comparativo_atletas(entrada: str, df: pd.DataFrame) -> str:
     
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(categorias, fontsize=10, weight='bold', color="#E6EDF3")
-    fig.text(0.5, 0.94, f"RADAR DE PERFORMANCE - {'ABSOLUTAS' if modo == 'absoluto' else 'RELATIVAS (%)'}", fontsize=14, weight='bold', color="#E6EDF3", ha='center')
+    fig.text(0.5, 0.94, "RADAR DE PERFORMANCE COMPARATIVO", fontsize=14, weight='bold', color="#E6EDF3", ha='center')
     
-    # RESTAURANDO A LEGENDA COLORIDA
+    # Legenda 
     fig.text(0.35, 0.86, f"● {atleta1}", color="#58A6FF", fontsize=11, weight='bold', ha='center')
     fig.text(0.65, 0.86, f"● {atleta2}", color="#FF7B72", fontsize=11, weight='bold', ha='center')
     
+    # Output via Streamlit
     st.pyplot(fig)
     plt.close(fig)
 
