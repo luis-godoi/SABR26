@@ -12,12 +12,9 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from ferramentas import llm, obter_todas_ferramentas
 
-# --------------------------------------------------------------------------- #
-# Configuração geral
-# --------------------------------------------------------------------------- #
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA_PATH = PROJECT_ROOT / "dados_volei.csv"
+DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "brazil_matches_performance2.csv"
 
 load_dotenv()
 
@@ -41,15 +38,9 @@ def _validate_env() -> None:
         st.stop()
 
 
-def _resolve_data_path(uploaded_file) -> Path | None:
-    """Decide de onde carregar os dados: upload manual (opcional), variável de ambiente,
-    caminho padrão ou qualquer CSV já presente no projeto/pasta data."""
-    if uploaded_file is not None:
-        temp_path = PROJECT_ROOT / "data" / "uploaded_dados.csv"
-        temp_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path.write_bytes(uploaded_file.getvalue())
-        return temp_path
-
+def _resolve_data_path() -> Path | None:
+    """Decide de onde carregar os dados: variável de ambiente,
+    caminho padrão ou qualquer CSV já presente na pasta data."""
     configured = os.getenv("DATA_CSV_PATH")
     if configured:
         data_path = Path(configured)
@@ -61,7 +52,7 @@ def _resolve_data_path(uploaded_file) -> Path | None:
     if DEFAULT_DATA_PATH.exists():
         return DEFAULT_DATA_PATH
 
-    # Procura automaticamente qualquer CSV já presente no projeto ou na pasta data/
+    # Procura automaticamente qualquer CSV na pasta data/ ou raiz
     for pasta in (PROJECT_ROOT / "data", PROJECT_ROOT):
         if pasta.exists():
             csvs = sorted(pasta.glob("*.csv"))
@@ -84,20 +75,15 @@ def _construir_agente(df: pd.DataFrame) -> AgentExecutor:
             (
                 "system",
                 """Você é um assistente analítico especializado em estatísticas de voleibol.
-Use as ferramentas disponíveis para responder com precisão às perguntas do usuário sobre
-jogadores, partidas, rankings, comparações e gráficos.
+Use as ferramentas para buscar a informação solicitada.
 
-Regras Inegociáveis:
-1. Sempre que a pergunta envolver rankings, líderes ou eficiência agregada do campeonato,
-   use a ferramenta 'metricas_calculadas_jogadores'.
-2. Sempre que o usuário pedir para comparar dois jogadores ou um radar/perfil técnico,
-   use a ferramenta 'radar_comparativo_atletas'.
-3. Sempre que o usuário pedir um gráfico livre (distribuição, dispersão, série temporal),
-   use a ferramenta 'gerador_graficos_estatisticos'.
-4. Para cálculos pontuais ou filtragens específicas sobre o DataFrame, use a ferramenta
-   'motor_calculo_python'.
+Regras de Resposta:
+1. SEJA DIRETO: Se o usuário perguntar "quem é o maior X", responda APENAS o nome do jogador e o valor da estatística.
+2. NÃO REPITA A TABELA: Não liste todos os fundamentos (attack_points, serve_aces, etc.) a menos que o usuário peça uma análise completa.
+3. Foque na pergunta: Se perguntaram sobre bloqueio, responda apenas sobre bloqueio.
+4. Use as ferramentas apenas para buscar o dado; a formatação do texto final deve ser limpa e minimalista.
 5. Nunca invente números — use exclusivamente o que as ferramentas retornarem.
-6. Responda sempre em português, de forma direta, técnica e objetiva.""",
+6. Responda em português, de forma técnica e objetiva.""",
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
@@ -131,19 +117,16 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Dados")
-        uploaded_file = st.file_uploader(
-            "Substituir o CSV do projeto (opcional)", type=["csv"]
-        )
-        data_path = _resolve_data_path(uploaded_file)
+        data_path = _resolve_data_path()
 
         if data_path is None:
             st.error(
-                "Nenhum CSV encontrado no projeto. Coloque um arquivo .csv na pasta "
-                "'data/', na raiz do projeto, ou defina DATA_CSV_PATH no .env."
+                "Nenhum CSV encontrado. Certifique-se de que o arquivo 'brazil_matches_performance2.csv' "
+                "está localizado na pasta 'data/'."
             )
             st.stop()
 
-        st.success(f"Dados carregados de: {data_path.name}")
+        st.success(f"Dados carregados: {data_path.name}")
 
         if st.button("🔄 Recarregar dados"):
             _carregar_dataframe.clear()
